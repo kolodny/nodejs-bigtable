@@ -16,16 +16,16 @@
 
 'use strict';
 
-var arrify = require('arrify');
-var common = require('@google-cloud/common');
-var commonGrpc = require('@google-cloud/common-grpc');
-var extend = require('extend');
-var path = require('path');
-var is = require('is');
-var util = require('util');
+const arrify = require('arrify');
+const common = require('@google-cloud/common');
+const commonGrpc = require('@google-cloud/common-grpc');
+const extend = require('extend');
+const path = require('path');
+const is = require('is');
+const util = require('util');
 
-var Cluster = require('./cluster.js');
-var Instance = require('./instance.js');
+const Cluster = require('./cluster.js');
+const Instance = require('./instance.js');
 
 /**
  * @typedef {object} ClientConfig
@@ -326,258 +326,275 @@ var Instance = require('./instance.js');
  *   }
  * });
  */
-function Bigtable(options) {
-  if (!(this instanceof Bigtable)) {
-    options = common.util.normalizeArguments(this, options);
-    return new Bigtable(options);
-  }
+class Bigtable extends commonGrpc.Service {
+  constructor(options) {
+    if (!(this instanceof Bigtable)) {
+      options = common.util.normalizeArguments(this, options);
+      return new Bigtable(options);
+    }
 
-  options = options || {};
+    options = options || {};
 
-  var baseUrl = 'bigtable.googleapis.com';
-  var adminBaseUrl = 'bigtableadmin.googleapis.com';
+    let baseUrl = 'bigtable.googleapis.com';
+    let adminBaseUrl = 'bigtableadmin.googleapis.com';
 
-  var customEndpoint =
-    options.apiEndpoint || process.env.BIGTABLE_EMULATOR_HOST;
+    const customEndpoint =
+      options.apiEndpoint || process.env.BIGTABLE_EMULATOR_HOST;
 
-  if (customEndpoint) {
-    baseUrl = customEndpoint;
-    adminBaseUrl = baseUrl;
-  }
+    if (customEndpoint) {
+      baseUrl = customEndpoint;
+      adminBaseUrl = baseUrl;
+    }
 
-  var config = {
-    baseUrl: baseUrl,
-    customEndpoint: !!customEndpoint,
-    protosDir: path.resolve(__dirname, '../protos'),
-    protoServices: {
-      Bigtable: {
-        baseUrl: baseUrl,
-        path: 'google/bigtable/v2/bigtable.proto',
-        service: 'bigtable.v2',
+    const config = {
+      baseUrl: baseUrl,
+      customEndpoint: !!customEndpoint,
+      protosDir: path.resolve(__dirname, '../protos'),
+      protoServices: {
+        Bigtable: {
+          baseUrl: baseUrl,
+          path: 'google/bigtable/v2/bigtable.proto',
+          service: 'bigtable.v2',
+        },
+        BigtableTableAdmin: {
+          baseUrl: adminBaseUrl,
+          path: 'google/bigtable/admin/v2/bigtable_table_admin.proto',
+          service: 'bigtable.admin.v2',
+        },
+        BigtableInstanceAdmin: {
+          baseUrl: adminBaseUrl,
+          path: 'google/bigtable/admin/v2/bigtable_instance_admin.proto',
+          service: 'bigtable.admin.v2',
+        },
+        Operations: {
+          baseUrl: adminBaseUrl,
+          path: 'google/longrunning/operations.proto',
+          service: 'longrunning',
+        },
       },
-      BigtableTableAdmin: {
-        baseUrl: adminBaseUrl,
-        path: 'google/bigtable/admin/v2/bigtable_table_admin.proto',
-        service: 'bigtable.admin.v2',
-      },
-      BigtableInstanceAdmin: {
-        baseUrl: adminBaseUrl,
-        path: 'google/bigtable/admin/v2/bigtable_instance_admin.proto',
-        service: 'bigtable.admin.v2',
-      },
-      Operations: {
-        baseUrl: adminBaseUrl,
-        path: 'google/longrunning/operations.proto',
-        service: 'longrunning',
-      },
-    },
-    scopes: [
-      'https://www.googleapis.com/auth/bigtable.admin',
-      'https://www.googleapis.com/auth/bigtable.data',
-      'https://www.googleapis.com/auth/cloud-platform',
-    ],
-    packageJson: require('../package.json'),
-  };
-
-  commonGrpc.Service.call(this, config, options);
-
-  this.projectName = 'projects/' + this.projectId;
-}
-
-util.inherits(Bigtable, commonGrpc.Service);
-
-/**
- * Create a Compute instance.
- *
- * @see [Creating a Compute Instance]{@link https://cloud.google.com/bigtable/docs/creating-compute-instance}
- *
- * @param {string} name The unique name of the instance.
- * @param {object} [options] Instance creation options.
- * @param {object[]} [options.clusters] The clusters to be created within the
- *     instance.
- * @param {string} [options.displayName] The descriptive name for this instance
- *     as it appears in UIs.
- * @param {function} callback The callback function.
- * @param {?error} callback.err An error returned while making this request.
- * @param {Instance} callback.instance The newly created
- *     instance.
- * @param {Operation} callback.operation An operation object that can be used
- *     to check the status of the request.
- * @param {object} callback.apiResponse The full API response.
- *
- * @example
- * const Bigtable = require('@google-cloud/bigtable');
- * const bigtable = new Bigtable();
- *
- * const callback = function(err, instance, operation, apiResponse) {
- *   if (err) {
- *     // Error handling omitted.
- *   }
- *
- *   operation
- *     .on('error', console.log)
- *     .on('complete', function() {
- *       // The instance was created successfully.
- *     });
- * };
- *
- * const options = {
- *   displayName: 'my-sweet-instance',
- *   clusters: [
- *     {
- *       name: 'my-sweet-cluster',
- *       nodes: 3,
- *       location: 'us-central1-b',
- *       storage: 'ssd'
- *     }
- *   ]
- * };
- *
- * bigtable.createInstance('my-instance', options, callback);
- *
- * //-
- * // If the callback is omitted, we'll return a Promise.
- * //-
- * bigtable.createInstance('my-instance', options).then(function(data) {
- *   const instance = data[0];
- *   const operation = data[1];
- *   const apiResponse = data[2];
- * });
- */
-Bigtable.prototype.createInstance = function(name, options, callback) {
-  var self = this;
-
-  if (is.function(options)) {
-    callback = options;
-    options = {};
-  }
-
-  var protoOpts = {
-    service: 'BigtableInstanceAdmin',
-    method: 'createInstance',
-  };
-
-  var reqOpts = {
-    parent: this.projectName,
-    instanceId: name,
-    instance: {
-      displayName: options.displayName || name,
-    },
-  };
-
-  reqOpts.clusters = arrify(options.clusters).reduce(function(
-    clusters,
-    cluster
-  ) {
-    clusters[cluster.name] = {
-      location: Cluster.getLocation_(self.projectId, cluster.location),
-      serveNodes: cluster.nodes,
-      defaultStorageType: Cluster.getStorageType_(cluster.storage),
+      scopes: [
+        'https://www.googleapis.com/auth/bigtable.admin',
+        'https://www.googleapis.com/auth/bigtable.data',
+        'https://www.googleapis.com/auth/cloud-platform',
+      ],
+      packageJson: require('../package.json'),
     };
 
-    return clusters;
-  },
-  {});
+    super(config, options);
 
-  this.request(protoOpts, reqOpts, function(err, resp) {
-    if (err) {
-      callback(err, null, null, resp);
-      return;
-    }
-
-    var instance = self.instance(name);
-    var operation = self.operation(resp.name);
-    operation.metadata = resp;
-
-    callback(null, instance, operation, resp);
-  });
-};
-
-/**
- * Get Instance objects for all of your Compute instances.
- *
- * @param {object} query Query object.
- * @param {boolean} query.autoPaginate Have pagination handled
- *     automatically. Default: true.
- * @param {number} query.maxApiCalls Maximum number of API calls to make.
- * @param {number} query.maxResults Maximum number of results to return.
- * @param {string} query.pageToken Token returned from a previous call, to
- *     request the next page of results.
- * @param {function} callback The callback function.
- * @param {?error} callback.error An error returned while making this request.
- * @param {Instance[]} callback.instances List of all
- *     instances.
- * @param {object} callback.apiResponse The full API response.
- *
- * @example
- * const Bigtable = require('@google-cloud/bigtable');
- * const bigtable = new Bigtable();
- *
- * bigtable.getInstances(function(err, instances) {
- *   if (!err) {
- *     // `instances` is an array of Instance objects.
- *   }
- * });
- *
- * //-
- * // To control how many API requests are made and page through the results
- * // manually, set `autoPaginate` to false.
- * //-
- * const callback = function(err, instances, nextQuery, apiResponse) {
- *   if (nextQuery) {
- *     // More results exist.
- *     bigtable.getInstances(nextQuery, calback);
- *   }
- * };
- *
- * bigtable.getInstances({
- *   autoPaginate: false
- * }, callback);
- *
- * //-
- * // If the callback is omitted, we'll return a Promise.
- * //-
- * bigtable.getInstances().then(function(data) {
- *   const instances = data[0];
- * });
- */
-Bigtable.prototype.getInstances = function(query, callback) {
-  var self = this;
-
-  if (is.function(query)) {
-    callback = query;
-    query = {};
+    this.projectName = `projects/${this.projectId}`;
   }
 
-  var protoOpts = {
-    service: 'BigtableInstanceAdmin',
-    method: 'listInstances',
-  };
+  /**
+   * Create a Compute instance.
+   *
+   * @see [Creating a Compute Instance]{@link https://cloud.google.com/bigtable/docs/creating-compute-instance}
+   *
+   * @param {string} name The unique name of the instance.
+   * @param {object} [options] Instance creation options.
+   * @param {object[]} [options.clusters] The clusters to be created within the
+   *     instance.
+   * @param {string} [options.displayName] The descriptive name for this instance
+   *     as it appears in UIs.
+   * @param {function} callback The callback function.
+   * @param {?error} callback.err An error returned while making this request.
+   * @param {Instance} callback.instance The newly created
+   *     instance.
+   * @param {Operation} callback.operation An operation object that can be used
+   *     to check the status of the request.
+   * @param {object} callback.apiResponse The full API response.
+   *
+   * @example
+   * const Bigtable = require('@google-cloud/bigtable');
+   * const bigtable = new Bigtable();
+   *
+   * const callback = function(err, instance, operation, apiResponse) {
+   *   if (err) {
+   *     // Error handling omitted.
+   *   }
+   *
+   *   operation
+   *     .on('error', console.log)
+   *     .on('complete', function() {
+   *       // The instance was created successfully.
+   *     });
+   * };
+   *
+   * const options = {
+   *   displayName: 'my-sweet-instance',
+   *   clusters: [
+   *     {
+   *       name: 'my-sweet-cluster',
+   *       nodes: 3,
+   *       location: 'us-central1-b',
+   *       storage: 'ssd'
+   *     }
+   *   ]
+   * };
+   *
+   * bigtable.createInstance('my-instance', options, callback);
+   *
+   * //-
+   * // If the callback is omitted, we'll return a Promise.
+   * //-
+   * bigtable.createInstance('my-instance', options).then(function(data) {
+   *   const instance = data[0];
+   *   const operation = data[1];
+   *   const apiResponse = data[2];
+   * });
+   */
+  createInstance(name, options, callback) {
+    const self = this;
 
-  var reqOpts = extend({}, query, {
-    parent: this.projectName,
-  });
-
-  this.request(protoOpts, reqOpts, function(err, resp) {
-    if (err) {
-      callback(err, null, null, resp);
-      return;
+    if (is.function(options)) {
+      callback = options;
+      options = {};
     }
 
-    var instances = resp.instances.map(function(instanceData) {
-      var instance = self.instance(instanceData.name);
-      instance.metadata = instanceData;
-      return instance;
+    const protoOpts = {
+      service: 'BigtableInstanceAdmin',
+      method: 'createInstance',
+    };
+
+    const reqOpts = {
+      parent: this.projectName,
+      instanceId: name,
+      instance: {
+        displayName: options.displayName || name,
+      },
+    };
+
+    reqOpts.clusters = arrify(options.clusters).reduce((clusters, cluster) => {
+      clusters[cluster.name] = {
+        location: Cluster.getLocation_(self.projectId, cluster.location),
+        serveNodes: cluster.nodes,
+        defaultStorageType: Cluster.getStorageType_(cluster.storage),
+      };
+
+      return clusters;
+    },
+    {});
+
+    this.request(protoOpts, reqOpts, (err, resp) => {
+      if (err) {
+        callback(err, null, null, resp);
+        return;
+      }
+
+      const instance = self.instance(name);
+      const operation = self.operation(resp.name);
+      operation.metadata = resp;
+
+      callback(null, instance, operation, resp);
+    });
+  }
+
+  /**
+   * Get Instance objects for all of your Compute instances.
+   *
+   * @param {object} query Query object.
+   * @param {boolean} query.autoPaginate Have pagination handled
+   *     automatically. Default: true.
+   * @param {number} query.maxApiCalls Maximum number of API calls to make.
+   * @param {number} query.maxResults Maximum number of results to return.
+   * @param {string} query.pageToken Token returned from a previous call, to
+   *     request the next page of results.
+   * @param {function} callback The callback function.
+   * @param {?error} callback.error An error returned while making this request.
+   * @param {Instance[]} callback.instances List of all
+   *     instances.
+   * @param {object} callback.apiResponse The full API response.
+   *
+   * @example
+   * const Bigtable = require('@google-cloud/bigtable');
+   * const bigtable = new Bigtable();
+   *
+   * bigtable.getInstances(function(err, instances) {
+   *   if (!err) {
+   *     // `instances` is an array of Instance objects.
+   *   }
+   * });
+   *
+   * //-
+   * // To control how many API requests are made and page through the results
+   * // manually, set `autoPaginate` to false.
+   * //-
+   * const callback = function(err, instances, nextQuery, apiResponse) {
+   *   if (nextQuery) {
+   *     // More results exist.
+   *     bigtable.getInstances(nextQuery, calback);
+   *   }
+   * };
+   *
+   * bigtable.getInstances({
+   *   autoPaginate: false
+   * }, callback);
+   *
+   * //-
+   * // If the callback is omitted, we'll return a Promise.
+   * //-
+   * bigtable.getInstances().then(function(data) {
+   *   const instances = data[0];
+   * });
+   */
+  getInstances(query, callback) {
+    const self = this;
+
+    if (is.function(query)) {
+      callback = query;
+      query = {};
+    }
+
+    const protoOpts = {
+      service: 'BigtableInstanceAdmin',
+      method: 'listInstances',
+    };
+
+    const reqOpts = extend({}, query, {
+      parent: this.projectName,
     });
 
-    var nextQuery = null;
-    if (resp.nextPageToken) {
-      nextQuery = extend({}, query, {pageToken: resp.nextPageToken});
-    }
+    this.request(protoOpts, reqOpts, (err, resp) => {
+      if (err) {
+        callback(err, null, null, resp);
+        return;
+      }
 
-    callback(null, instances, nextQuery, resp);
-  });
-};
+      const instances = resp.instances.map(instanceData => {
+        const instance = self.instance(instanceData.name);
+        instance.metadata = instanceData;
+        return instance;
+      });
+
+      let nextQuery = null;
+      if (resp.nextPageToken) {
+        nextQuery = extend({}, query, {pageToken: resp.nextPageToken});
+      }
+
+      callback(null, instances, nextQuery, resp);
+    });
+  }
+
+  /**
+   * Get a reference to a Compute instance.
+   *
+   * @param {string} name The name of the instance.
+   * @returns {Instance}
+   */
+  instance(name) {
+    return new Instance(this, name);
+  }
+
+  /**
+   * Get a reference to an Operation.
+   *
+   * @param {string} name The name of the instance.
+   * @returns {Operation}
+   */
+  operation(name) {
+    return new commonGrpc.Operation(this, name);
+  }
+}
 
 /**
  * Get {@link Iinstance} objects for all of your Compute instances as a
@@ -612,26 +629,6 @@ Bigtable.prototype.getInstances = function(query, callback) {
 Bigtable.prototype.getInstancesStream = common.paginator.streamify(
   'getInstances'
 );
-
-/**
- * Get a reference to a Compute instance.
- *
- * @param {string} name The name of the instance.
- * @returns {Instance}
- */
-Bigtable.prototype.instance = function(name) {
-  return new Instance(this, name);
-};
-
-/**
- * Get a reference to an Operation.
- *
- * @param {string} name The name of the instance.
- * @returns {Operation}
- */
-Bigtable.prototype.operation = function(name) {
-  return new commonGrpc.Operation(this, name);
-};
 
 /*! Developer Documentation
  *

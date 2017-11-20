@@ -16,10 +16,10 @@
 
 'use strict';
 
-var arrify = require('arrify');
-var Buffer = require('safe-buffer').Buffer;
-var Int64 = require('node-int64');
-var is = require('is');
+const arrify = require('arrify');
+const Buffer = require('safe-buffer').Buffer;
+const Int64 = require('node-int64');
+const is = require('is');
 
 /**
  * Formats table mutations to be in the expected proto format.
@@ -38,10 +38,33 @@ var is = require('is');
  *   }
  * });
  */
-function Mutation(mutation) {
-  this.key = mutation.key;
-  this.method = mutation.method;
-  this.data = mutation.data;
+class Mutation {
+  constructor(mutation) {
+    this.key = mutation.key;
+    this.method = mutation.method;
+    this.data = mutation.data;
+  }
+
+  /**
+   * Converts the mutation object into proto friendly JSON.
+   *
+   * @returns {object}
+   */
+  toProto() {
+    const mutation = {};
+
+    if (this.key) {
+      mutation.rowKey = Mutation.convertToBytes(this.key);
+    }
+
+    if (this.method === methods.INSERT) {
+      mutation.mutations = Mutation.encodeSetCell(this.data);
+    } else if (this.method === methods.DELETE) {
+      mutation.mutations = Mutation.encodeDelete(this.data);
+    }
+
+    return mutation;
+  }
 }
 
 /**
@@ -50,7 +73,7 @@ function Mutation(mutation) {
  * INSERT => setCell
  * DELETE => deleteFrom*
  */
-var methods = (Mutation.methods = {
+const methods = (Mutation.methods = {
   INSERT: 'insert',
   DELETE: 'delete',
 });
@@ -61,9 +84,9 @@ var methods = (Mutation.methods = {
  * @param {string} bytes - Base64 encoded string.
  * @returns {string|number|buffer}
  */
-Mutation.convertFromBytes = function(bytes, options) {
-  var buf = Buffer.from(bytes, 'base64');
-  var num = new Int64(buf).toNumber();
+Mutation.convertFromBytes = (bytes, options) => {
+  const buf = Buffer.from(bytes, 'base64');
+  const num = new Int64(buf).toNumber();
 
   if (!isNaN(num) && isFinite(num)) {
     return num;
@@ -82,7 +105,7 @@ Mutation.convertFromBytes = function(bytes, options) {
  * @param {string} data - The data to be sent.
  * @returns {buffer}
  */
-Mutation.convertToBytes = function(data) {
+Mutation.convertToBytes = data => {
   if (data instanceof Buffer) {
     return data;
   }
@@ -105,8 +128,8 @@ Mutation.convertToBytes = function(data) {
  * @param {date} end - The end date.
  * @returns {object}
  */
-Mutation.createTimeRange = function(start, end) {
-  var range = {};
+Mutation.createTimeRange = (start, end) => {
+  const range = {};
 
   if (is.date(start)) {
     range.startTimestampMicros = start.getTime() * 1000;
@@ -150,14 +173,14 @@ Mutation.createTimeRange = function(start, end) {
  * //   }
  * // ]
  */
-Mutation.encodeSetCell = function(data) {
-  var mutations = [];
+Mutation.encodeSetCell = data => {
+  const mutations = [];
 
-  Object.keys(data).forEach(function(familyName) {
-    var family = data[familyName];
+  Object.keys(data).forEach(familyName => {
+    const family = data[familyName];
 
-    Object.keys(family).forEach(function(cellName) {
-      var cell = family[cellName];
+    Object.keys(family).forEach(cellName => {
+      let cell = family[cellName];
 
       if (!is.object(cell) || cell instanceof Buffer) {
         cell = {
@@ -165,13 +188,13 @@ Mutation.encodeSetCell = function(data) {
         };
       }
 
-      var timestamp = cell.timestamp;
+      let timestamp = cell.timestamp;
 
       if (is.date(timestamp)) {
         timestamp = timestamp.getTime() * 1000;
       }
 
-      var setCell = {
+      const setCell = {
         familyName: familyName,
         columnQualifier: Mutation.convertToBytes(cellName),
         timestampMicros: timestamp || -1,
@@ -236,7 +259,7 @@ Mutation.encodeSetCell = function(data) {
  *   }
  * ]);
  */
-Mutation.encodeDelete = function(data) {
+Mutation.encodeDelete = data => {
   if (!data) {
     return [
       {
@@ -245,14 +268,14 @@ Mutation.encodeDelete = function(data) {
     ];
   }
 
-  return arrify(data).map(function(mutation) {
+  return arrify(data).map(mutation => {
     if (is.string(mutation)) {
       mutation = {
         column: mutation,
       };
     }
 
-    var column = Mutation.parseColumnName(mutation.column);
+    const column = Mutation.parseColumnName(mutation.column);
 
     if (!column.qualifier) {
       return {
@@ -262,7 +285,7 @@ Mutation.encodeDelete = function(data) {
       };
     }
 
-    var timeRange;
+    let timeRange;
 
     if (mutation.time) {
       timeRange = Mutation.createTimeRange(
@@ -287,7 +310,7 @@ Mutation.encodeDelete = function(data) {
  * @param {object} entry - The entity data.
  * @returns {object}
  */
-Mutation.parse = function(mutation) {
+Mutation.parse = mutation => {
   if (!(mutation instanceof Mutation)) {
     mutation = new Mutation(mutation);
   }
@@ -308,34 +331,13 @@ Mutation.parse = function(mutation) {
  * //  qualifier: 'gwashington'
  * // }
  */
-Mutation.parseColumnName = function(column) {
-  var parts = column.split(':');
+Mutation.parseColumnName = column => {
+  const parts = column.split(':');
 
   return {
     family: parts[0],
     qualifier: parts[1],
   };
-};
-
-/**
- * Converts the mutation object into proto friendly JSON.
- *
- * @returns {object}
- */
-Mutation.prototype.toProto = function() {
-  var mutation = {};
-
-  if (this.key) {
-    mutation.rowKey = Mutation.convertToBytes(this.key);
-  }
-
-  if (this.method === methods.INSERT) {
-    mutation.mutations = Mutation.encodeSetCell(this.data);
-  } else if (this.method === methods.DELETE) {
-    mutation.mutations = Mutation.encodeDelete(this.data);
-  }
-
-  return mutation;
 };
 
 module.exports = Mutation;
