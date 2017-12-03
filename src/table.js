@@ -24,6 +24,7 @@ var flatten = require('lodash.flatten');
 var is = require('is');
 var propAssign = require('prop-assign');
 var pumpify = require('pumpify');
+var retryRequest = require('retry-request');
 var through = require('through2');
 var util = require('util');
 
@@ -927,45 +928,72 @@ Table.prototype.insert = function(entries, callback) {
 Table.prototype.mutate = function(entries, callback) {
   entries = flatten(arrify(entries));
 
-  var grpcOpts = {
-    service: 'Bigtable',
-    method: 'mutateRows',
-  };
+  var requestsMade = 0;
 
-  var reqOpts = {
-    objectMode: true,
-    tableName: this.id,
-    entries: entries.map(Mutation.parse),
-  };
+  var maxRetries = this.maxRetries || 3;
+  var pendingEntryIndices = new Set(entries.map((entry, index) => index));
+  var entryToIndex = new Map(entries.map((entry, index) => [entry, index]));
+  var mutationErrorsByEntryIndex = new Map();
 
-  var mutationErrors = [];
-
-  this.requestStream(grpcOpts, reqOpts)
-    .on('error', callback)
-    .on('data', function(obj) {
-      obj.entries.forEach(function(entry) {
-        // Mutation was successful.
-        if (entry.status.code === 0) {
-          return;
-        }
-
-        var status = commonGrpc.Service.decorateStatus_(entry.status);
-        status.entry = entries[entry.index];
-
-        mutationErrors.push(status);
+  var onBatchResponse = () => {
+    if (pendingEntryIndices.size !== 0 && requestsMade <= maxRetries) {
+      setTimeout(
+        makeNextRequestBatch,
+        retryRequest.getNextRetryDelay(requestsMade)
+      );
+      return;
+    }
+    var err = null;
+    if (mutationErrorsByEntryIndex.size !== 0) {
+      var mutationErrors = Array.from(mutationErrorsByEntryIndex.values());
+      err = new common.util.PartialFailureError({
+        errors: mutationErrors
       });
-    })
-    .on('end', function() {
-      var err = null;
+    }
+    callback(err);
 
-      if (mutationErrors.length > 0) {
-        err = new common.util.PartialFailureError({
-          errors: mutationErrors,
-        });
+  };
+
+  var makeNextRequestBatch = () => {
+    var entryBatch = entries.filter((entry, index) => pendingEntryIndices.has(index));
+    var grpcOpts = {
+      service: 'Bigtable',
+      method: 'mutateRows',
+      entries: entryBatch.map(Mutation.parse),
+      retryOpts: {
+        currentRetryAttempt: requestsMade
       }
+    };
+    var reqOpts = {
+      objectMode: true,
+      tableName: this.id,
+      entries: entryBatch.map(Mutation.parse)
+    };
+    debugger;
+    this.requestStream(grpcOpts, reqOpts)
+      .on('request', () => requestsMade++)
+      .on('data', function(obj) {
+        obj.entries.forEach(function(entry) {
+          var originalEntry = entryBatch[entry.index]
+          var originalEntriesIndex = entryToIndex.get(originalEntry);
 
-      callback(err);
-    });
+          // Mutation was successful.
+          if (entry.status.code === 0) {
+            pendingEntryIndices.delete(originalEntriesIndex);
+            mutationErrorsByEntryIndex.delete(originalEntriesIndex);
+            return;
+          }
+
+          var status = commonGrpc.Service.decorateStatus_(entry.status);
+          status.entry = originalEntry;
+          mutationErrorsByEntryIndex.set(originalEntriesIndex, status)
+        });
+      })
+      .on('end', onBatchResponse)
+      .on('error', onBatchResponse);
+  };
+
+  makeNextRequestBatch();
 };
 
 /**
