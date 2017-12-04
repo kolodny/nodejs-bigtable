@@ -969,7 +969,6 @@ Table.prototype.mutate = function(entries, callback) {
       tableName: this.id,
       entries: entryBatch.map(Mutation.parse)
     };
-    debugger;
     this.requestStream(grpcOpts, reqOpts)
       .on('request', () => requestsMade++)
       .on('data', function(obj) {
