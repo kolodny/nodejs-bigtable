@@ -33,6 +33,10 @@ var Filter = require('./filter.js');
 var Mutation = require('./mutation.js');
 var Row = require('./row.js');
 
+// See protos/google/rpc/code.proto
+// (4=DEADLINE_EXCEEDED, 10=ABORTED, 14=UNAVAILABLE)
+const retryCodes = new Set([4, 10, 14])
+
 /**
  * Create a Table object to interact with a Cloud Bigtable table.
  *
@@ -981,6 +985,10 @@ Table.prototype.mutate = function(entries, callback) {
             pendingEntryIndices.delete(originalEntriesIndex);
             mutationErrorsByEntryIndex.delete(originalEntriesIndex);
             return;
+          }
+
+          if (!retryCodes.has(entry.status.code)) {
+            pendingEntryIndices.delete(originalEntriesIndex);
           }
 
           var status = commonGrpc.Service.decorateStatus_(entry.status);

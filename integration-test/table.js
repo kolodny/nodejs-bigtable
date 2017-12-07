@@ -8,9 +8,8 @@ const sinon = require('sinon');
 const through = require('through2');
 
 function chainEmits(emitter, responses) {
-  var index = 0;
+  let index = 0;
   setImmediate(next);
-  return emitter;
 
   function next() {
     if (index < responses.length) {
@@ -33,6 +32,12 @@ function entryResponses(statusCodes) {
   };
 }
 
+function getDeltas(array) {
+  return array.reduce((acc, item, index) => {
+    return index ? acc.concat(item - array[index - 1]) : [item];
+  }, [])
+}
+
 describe('Bigtable/Table', () => {
   const bigtable = new Bigtable();
   bigtable.grpcCredentials = grpc.credentials.createInsecure();
@@ -47,35 +52,38 @@ describe('Bigtable/Table', () => {
   describe('mutate()', () => {
     let clock;
     let entryKeyMutates;
+    let mutateCallTimes;
     let responses;
     let stub;
-    let timeout;
 
     beforeEach(() => {
 
-      // There's some weird bug with tick() and runAll(), this works.
-      const realTimeout = setTimeout;
-      (function tickTheClock() {
-        timeout = realTimeout(() => {
-          clock.tick(1000, 10);
-          tickTheClock();
-        });
-      })();
-
-      clock = sinon.useFakeTimers();
+      clock = sinon.useFakeTimers({ 
+        toFake: [
+          'setTimeout',
+          'clearTimeout',
+          'setImmediate',
+          'clearImmediate',
+          'setInterval',
+          'clearInterval',
+          'Date',
+          'nextTick',
+        ],
+      });
       entryKeyMutates = [];
+      mutateCallTimes = [];
       responses = null;
-      stub = sinon.stub(bigtableService, 'mutateRows', (grpcOpts) => {
+      stub = sinon.stub(bigtableService, 'mutateRows').callsFake((grpcOpts) => {
         entryKeyMutates.push(grpcOpts.entries.map(entry => entry.rowKey.asciiSlice()));
-        // console.log('called stub');
+        mutateCallTimes.push(new Date().getTime());
         const response = through.obj();
         chainEmits(response, responses.shift());
         return response;
       });
     });
     afterEach(() => {
-      clock.restore();
-      clearTimeout(timeout)
+      console.log(getDeltas(mutateCallTimes))
+      clock.uninstall();
       stub.restore();
     });
 
@@ -98,21 +106,22 @@ describe('Bigtable/Table', () => {
         assert.deepEqual(entryKeyMutates, [['foo', 'bar', 'baz']]);
         done();
       });
+      clock.runAll();
     });
 
     it('retries the failed mutations', (done) => {
       responses = [
         [
           ['response', {code: 200}],
-          ['data', entryResponses([0, 1, 1])],
+          ['data', entryResponses([0, 4, 4])],
           ['end'],
         ], [
           ['response', {code: 200}],
-          ['data', entryResponses([1, 0])],
+          ['data', entryResponses([4, 0])],
           ['end'],
         ], [
           ['response', {code: 200}],
-          ['data', entryResponses([1])],
+          ['data', entryResponses([4])],
           ['end'],
         ], [
           ['response', {code: 200}],
@@ -136,24 +145,29 @@ describe('Bigtable/Table', () => {
         ]);
         done();
       });
+      clock.runAll();
     });
 
     it('considers network errors towards the retry count', (done) => {
       responses = [
         [
           ['response', {code: 200}],
-          ['data', entryResponses([1, 1, 0])],
+          ['data', entryResponses([4, 4, 0])],
           ['end'],
         ], [
           ['response', {code: 429}],
           ['end'],
         ], [
           ['response', {code: 200}],
-          ['data', entryResponses([1, 0])],
+          ['data', entryResponses([4, 0])],
           ['end'],
         ], [
           ['response', {code: 200}],
-          ['data', entryResponses([1])],
+          ['data', entryResponses([4])],
+          ['end'],
+        ], [
+          ['response', {code: 200}],
+          ['data', entryResponses([4])],
           ['end'],
         ]
       ];
@@ -174,25 +188,27 @@ describe('Bigtable/Table', () => {
         ]);
         done();
       });
+      clock.runAll();
     });
 
     it('has a `PartialFailureError` error when an entry fails after the retries', (done) => {
+      debugger;
       responses = [
         [
           ['response', {code: 200}],
-          ['data', entryResponses([0, 1, 0])],
+          ['data', entryResponses([0, 4, 0])],
           ['end'],
         ], [
           ['response', {code: 200}],
-          ['data', entryResponses([1])],
+          ['data', entryResponses([4])],
           ['end'],
         ], [
           ['response', {code: 200}],
-          ['data', entryResponses([1])],
+          ['data', entryResponses([4])],
           ['end'],
         ], [
           ['response', {code: 200}],
-          ['data', entryResponses([1])],
+          ['data', entryResponses([4])],
           ['end'],
         ]
       ];
@@ -213,6 +229,7 @@ describe('Bigtable/Table', () => {
         ]);
         done();
       });
+      clock.runAll();
     });
 
   });
