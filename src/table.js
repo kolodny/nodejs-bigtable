@@ -934,12 +934,12 @@ Table.prototype.mutate = function(entries, callback) {
 
   var requestsMade = 0;
 
-  var maxRetries = this.maxRetries || 3;
+  var maxRetries = typeof this.maxRetries === 'number' ? this.maxRetries : 3;
   var pendingEntryIndices = new Set(entries.map((entry, index) => index));
   var entryToIndex = new Map(entries.map((entry, index) => [entry, index]));
   var mutationErrorsByEntryIndex = new Map();
 
-  var onBatchResponse = () => {
+  var onBatchResponse = (error) => {
     if (pendingEntryIndices.size !== 0 && requestsMade <= maxRetries) {
       setTimeout(
         makeNextRequestBatch,
@@ -947,7 +947,7 @@ Table.prototype.mutate = function(entries, callback) {
       );
       return;
     }
-    var err = null;
+    var err = error;
     if (mutationErrorsByEntryIndex.size !== 0) {
       var mutationErrors = Array.from(mutationErrorsByEntryIndex.values());
       err = new common.util.PartialFailureError({
@@ -959,15 +959,14 @@ Table.prototype.mutate = function(entries, callback) {
   };
 
   var makeNextRequestBatch = () => {
-    var entryBatch = entries.filter((entry, index) => pendingEntryIndices.has(index));
     var grpcOpts = {
       service: 'Bigtable',
       method: 'mutateRows',
-      entries: entryBatch.map(Mutation.parse),
       retryOpts: {
         currentRetryAttempt: requestsMade
       }
     };
+    var entryBatch = entries.filter((entry, index) => pendingEntryIndices.has(index));
     var reqOpts = {
       objectMode: true,
       tableName: this.id,
