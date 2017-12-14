@@ -486,7 +486,7 @@ Table.prototype.createReadStream = function(options) {
     reqOpts.rowsLimit = options.limit;
   }
   const chunkFormatter = new ChunkFormatter();
-  return pumpify.obj([
+  var stream = pumpify.obj([
     this.requestStream(grpcOpts, reqOpts),
     through.obj(
       function(data, enc, next) {
@@ -500,6 +500,9 @@ Table.prototype.createReadStream = function(options) {
             if (err) {
               throughStream.emit('error', err);
             } else {
+              if (stream._ended) {
+                return;
+              }
               var row = self.row(rowData.key);
               row.data = rowData.data;
               throughStream.push(row);
@@ -519,6 +522,8 @@ Table.prototype.createReadStream = function(options) {
       }
     ),
   ]);
+
+  return stream;
 };
 
 /**
