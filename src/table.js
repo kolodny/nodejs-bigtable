@@ -441,89 +441,127 @@ Table.prototype.createReadStream = function(options) {
   var self = this;
 
   options = options || {};
-  options.ranges = options.ranges || [];
 
-  var grpcOpts = {
-    service: 'Bigtable',
-    method: 'readRows',
-  };
+  let rowKeys;
+  let ranges = options.ranges || [];
+  let filter;
+  let rowsLimit;
+  let lastRowKey = '';
+  let rowsRead = 0
 
-  var reqOpts = {
-    tableName: this.id,
-    objectMode: true,
-  };
+
+  var numRetryAttempt = 0;
 
   if (options.start || options.end) {
-    options.ranges.push({
+    ranges.push({
       start: options.start,
-      end: options.end,
+      end: options.end,      
     });
   }
 
-  if (options.prefix) {
-    options.ranges.push(Table.createPrefixRange_(options.prefix));
+  if (options.keys) {
+    rowKeys = options.keys.map(Mutation.convertToBytes);
   }
 
-  if (options.keys || options.ranges.length) {
-    reqOpts.rows = {};
-
-    if (options.keys) {
-      reqOpts.rows.rowKeys = options.keys.map(Mutation.convertToBytes);
-    }
-
-    if (options.ranges.length) {
-      reqOpts.rows.rowRanges = options.ranges.map(function(range) {
-        return Filter.createRange(range.start, range.end, 'Key');
-      });
-    }
+  if (options.prefix) {
+    ranges.push(Table.createPrefixRange_(options.prefix));
   }
 
   if (options.filter) {
-    reqOpts.filter = Filter.parse(options.filter);
+    filter = Filter.parse(options.filter);
   }
 
   if (options.limit) {
-    reqOpts.rowsLimit = options.limit;
+    rowsLimit = options.limit;
   }
+
   const chunkFormatter = new ChunkFormatter();
-  var stream = pumpify.obj([
-    this.requestStream(grpcOpts, reqOpts),
-    through.obj(
-      function(data, enc, next) {
-        var throughStream = this;
-        chunkFormatter.formatChunks(
-          data.chunks,
-          {
-            decode: options.decode,
-          },
-          (err, rowData) => {
+  const retryStream = through.obj();
+  const makeNewRequest = () => {
+    var grpcOpts = {
+      service: 'Bigtable',
+      method: 'readRows',
+      retryOpts: {
+        currentRetryAttempt: numRetryAttempt,
+      },
+    };
+
+    var reqOpts = {
+      tableName: this.id,
+      objectMode: true,
+    };
+    if (lastRowKey !== '') {
+      const lastRowKeyBuffer = Mutation.convertToBytes(lastRowKey);
+      console.log('do your thing');
+      throw new Error('not implmented');
+    }
+    if (rowKeys || ranges.length) {
+      reqOpts.rows = {};
+      if (rowKeys) {
+        reqOpts.rows.rowKeys = rowKeys;
+      }
+      if (ranges.length) {
+        reqOpts.rows.rowRanges = ranges.map(function(range) {
+          return Filter.createRange(range.start, range.end, 'Key');
+        });
+      }
+    }
+    if (filter) {
+      reqOpts.filter = filter;
+    }
+
+    if (rowsLimit) {
+      reqOpts.rowsLimit = rowsLimit;
+    }
+
+    const requestStream = this.requestStream(grpcOpts, reqOpts)
+    requestStream.on('request', () => numRetryAttempt++);
+    var stream = pumpify.obj([
+      requestStream,
+      through.obj(
+        function(data, enc, next) {
+          var throughStream = this;
+          chunkFormatter.formatChunks(
+            data.chunks,
+            {
+              decode: options.decode,
+            },
+            (err, rowData) => {
+              if (err) {
+                throughStream.emit('error', err);
+              } else {
+                if (stream._ended) {
+                  return;
+                }
+                rowsRead++;
+                lastRowKey = rowData.key;
+                var row = self.row(rowData.key);
+                row.data = rowData.data;
+                throughStream.push(row);
+              }
+            }
+          );
+          next();
+        },
+        function(callback) {
+          var throughStream = this;
+          chunkFormatter.onStreamEnd(err => {
             if (err) {
               throughStream.emit('error', err);
-            } else {
-              if (stream._ended) {
-                return;
-              }
-              var row = self.row(rowData.key);
-              row.data = rowData.data;
-              throughStream.push(row);
             }
-          }
-        );
-        next();
-      },
-      function(callback) {
-        var throughStream = this;
-        chunkFormatter.onStreamEnd(err => {
-          if (err) {
-            throughStream.emit('error', err);
-          }
-        });
-        callback();
-      }
-    ),
-  ]);
+          });
+          callback();
+        }
+      ),
+    ]);
+    stream.on('error', error => {
 
-  return stream;
+      retryStream.emit('error', error)
+    })
+    stream.pipe(retryStream);
+  }
+  makeNewRequest();
+  return retryStream;
 };
 
 /**
