@@ -36,6 +36,7 @@ describe('Read Row Acceptance tests', function() {
   testcases.forEach(function(test) {
     it(test.name, done => {
       const table = new Table({id: 'xyz'}, 'my-table');
+      table.maxRetries = 0;
       const results = [];
       const rawResults = test.results || [];
       const errorCount = rawResults.filter(result => result.error).length;
