@@ -44,9 +44,10 @@ function getDeltas(array) {
   }, []);
 }
 
-describe.skip('Bigtable/Table', () => {
+describe('Bigtable/Table', () => {
   const bigtable = new Bigtable();
   bigtable.grpcCredentials = grpc.credentials.createInsecure();
+  const bigtableService = bigtable.getService_({service: 'Bigtable'});
 
   const INSTANCE = bigtable.instance('instance');
   const TABLE = INSTANCE.table('table');
@@ -74,10 +75,9 @@ describe.skip('Bigtable/Table', () => {
       mutationBatchesInvoked = [];
       mutationCallTimes = [];
       responses = null;
-      stub = sinon.stub(bigtable, 'request').callsFake(config => {
-        const reqOpts = config.reqOpts;
+      stub = sinon.stub(bigtableService, 'mutateRows').callsFake(grpcOpts => {
         mutationBatchesInvoked.push(
-          reqOpts.entries.map(entry => entry.rowKey.asciiSlice())
+          grpcOpts.entries.map(entry => entry.rowKey.asciiSlice())
         );
         mutationCallTimes.push(new Date().getTime());
         const emitter = through.obj();

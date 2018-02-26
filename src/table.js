@@ -416,15 +416,12 @@ Table.prototype.createReadStream = function(options) {
     let lastRowKey = chunkTransformer ? chunkTransformer.lastRowKey : '';
     chunkTransformer = new ChunkTransformer({decode: options.decode});
 
-    // @todo Figure out how to do this in gapic.
-    // var grpcOpts = {
-    //   retryOpts: {
-    //     currentRetryAttempt: numRequestsMade,
-    //   },
-    // };
-
     var reqOpts = {
       tableName: this.id,
+    };
+
+    var retryOpts = {
+      currentRetryAttempt: numRequestsMade,
     };
 
     if (lastRowKey) {
@@ -506,6 +503,7 @@ Table.prototype.createReadStream = function(options) {
       method: 'readRows',
       reqOpts: reqOpts,
       gaxOpts: options.gaxOptions,
+      retryOpts: retryOpts,
     });
 
     requestStream.on('request', () => numRequestsMade++);
@@ -1155,13 +1153,6 @@ Table.prototype.mutate = function(entries, gaxOptions, callback) {
   }
 
   function makeNextBatchRequest() {
-    // @todo Figure out how to do this in gapic.
-    // var grpcOpts = {
-    //   retryOpts: {
-    //     currentRetryAttempt: numRequestsMade,
-    //   },
-    // };
-
     var entryBatch = entries.filter((entry, index) => {
       return pendingEntryIndices.has(index);
     });
@@ -1171,15 +1162,23 @@ Table.prototype.mutate = function(entries, gaxOptions, callback) {
       entries: entryBatch.map(Mutation.parse),
     };
 
+    var retryOpts = {
+      currentRetryAttempt: numRequestsMade,
+    };
+
     self.bigtable
       .request({
         client: 'BigtableClient',
         method: 'mutateRows',
         reqOpts: reqOpts,
         gaxOpts: gaxOptions,
+        retryOpts: retryOpts,
       })
       .on('error', onBatchResponse)
       .on('request', () => numRequestsMade++)
+      .on('request', () => {
+        console.log('??')
+      })
       .on('data', function(obj) {
         obj.entries.forEach(function(entry) {
           var originalEntry = entryBatch[entry.index];
