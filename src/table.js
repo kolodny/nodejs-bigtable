@@ -1176,9 +1176,6 @@ Table.prototype.mutate = function(entries, gaxOptions, callback) {
       })
       .on('error', onBatchResponse)
       .on('request', () => numRequestsMade++)
-      .on('request', () => {
-        console.log('??')
-      })
       .on('data', function(obj) {
         obj.entries.forEach(function(entry) {
           var originalEntry = entryBatch[entry.index];
