@@ -19,7 +19,10 @@ function dispatch(emitter, response) {
   let index = 0;
   setImmediate(next);
 
+  console.log('Executes')
   function next() {
+    console.log('Never executes')
+
     if (index < emits.length) {
       const emit = emits[index];
       index++;
@@ -44,7 +47,7 @@ function getDeltas(array) {
   }, []);
 }
 
-describe('Bigtable/Table', () => {
+describe.only('Bigtable/Table', () => {
   const bigtable = new Bigtable();
   bigtable.api = {};
   bigtable.auth = {
@@ -97,38 +100,42 @@ describe('Bigtable/Table', () => {
         responses = test.responses;
         TABLE.maxRetries = test.max_retries;
         TABLE.mutate(test.mutations_request, error => {
-          assert.deepEqual(
-            mutationBatchesInvoked,
-            test.mutation_batches_invoked
-          );
-          getDeltas(mutationCallTimes).forEach((delta, index) => {
-            if (index === 0) {
-              const message = 'First request should happen Immediately';
-              assert.strictEqual(index, 0, message);
-              return;
-            }
-            const minBackoff = 1000 * Math.pow(2, index);
+          try {
+            assert.deepEqual(
+              mutationBatchesInvoked,
+              test.mutation_batches_invoked
+            );
+            getDeltas(mutationCallTimes).forEach((delta, index) => {
+              if (index === 0) {
+                const message = 'First request should happen Immediately';
+                assert.strictEqual(index, 0, message);
+                return;
+              }
+              const minBackoff = 1000 * Math.pow(2, index);
 
-            // Adjust for some flakiness with the fake timers.
-            const maxBackoff = minBackoff + 1010;
-            const message =
-              `Backoff for retry #${index} should be between ` +
-              `${minBackoff} and ${maxBackoff}, was ${delta}`;
-            assert(delta > minBackoff, message);
-            assert(delta < maxBackoff, message);
-          });
-          if (test.errors) {
-            const expectedIndices = test.errors.map(error => {
-              return error.index_in_mutations_request;
+              // Adjust for some flakiness with the fake timers.
+              const maxBackoff = minBackoff + 1010;
+              const message =
+                `Backoff for retry #${index} should be between ` +
+                `${minBackoff} and ${maxBackoff}, was ${delta}`;
+              assert(delta > minBackoff, message);
+              assert(delta < maxBackoff, message);
             });
-            const actualIndices = error.errors.map(error => {
-              return test.mutations_request.indexOf(error.entry);
-            });
-            assert.deepEqual(expectedIndices, actualIndices);
-          } else {
-            assert.ifError(error);
+            if (test.errors) {
+              const expectedIndices = test.errors.map(error => {
+                return error.index_in_mutations_request;
+              });
+              const actualIndices = error.errors.map(error => {
+                return test.mutations_request.indexOf(error.entry);
+              });
+              assert.deepEqual(expectedIndices, actualIndices);
+            } else {
+              assert.ifError(error);
+            }
+            done();
+          } catch (error) {
+            done(error);
           }
-          done();
         });
         clock.runAll();
       });
